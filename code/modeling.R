@@ -369,7 +369,7 @@ wd2 <- wd %>%
                   ifelse(p1.elig==1 & year(date.adm)<2021,
                          as.Date("2021-01-01", format="%Y-%m-%d"), NA)),
       p1.date.adm=as.Date(p1.date.adm, format="%Y-%m-%d"),
-      p1.date.rel=as.Date(p1.date.rel, format="%Y-%m-%d"))
+      p1.date.rel=as.Date(p1.date.rel, format="%Y-%m-%d"),
 
      # P2: Elder Parole
       p2.rel.group = ifelse(p2.elig==1,
@@ -378,6 +378,7 @@ wd2 <- wd %>%
       p2.date.rel = ifelse(p2.rel.group=="board", date.elig2+(max.exp.date-date.elig2)*addTime,
                     ifelse(p2.rel.group=="CR", cond.rel.date,
                     ifelse(p2.rel.group=="NoRel", max.exp.date, NA))),
+      p2.date.rel = ifelse(p2.elig==1 & year(as.Date(p2.date.rel,format="%Y-%m-%d"))<2021, 2021, p2.date.rel),
 
      # P5: Youth Parole
       p5.rel.group = ifelse(p5.elig==1,
@@ -386,6 +387,7 @@ wd2 <- wd %>%
       p5.date.rel = ifelse(p5.rel.group=="board", date.elig5+(max.exp.date-date.elig5)*addTime,
                     ifelse(p5.rel.group=="CR", cond.rel.date,
                     ifelse(p5.rel.group=="NoRel", max.exp.date, NA))),
+      p5.date.rel = ifelse(p5.elig==1 & year(as.Date(p5.date.rel,format="%Y-%m-%d"))<2021, 2021, p5.date.rel),
 
      # P3: Fair and Timely Parole
       p3.rel.group = ifelse(p3.elig==1,
@@ -394,6 +396,7 @@ wd2 <- wd %>%
       p3.date.rel = ifelse(p3.rel.group=="board", date.elig3+(max.exp.date-date.elig3)*addTime,
                     ifelse(p3.rel.group=="CR", cond.rel.date,
                     ifelse(p3.rel.group=="NoRel", max.exp.date, NA))),
+      p3.date.rel = ifelse(p3.elig==1 & year(as.Date(p3.date.rel,format="%Y-%m-%d"))<2021, 2021, p3.date.rel),
 
      # P4: Retroactive Sentencing
       p4.rel.group = ifelse(p4.elig==1,
@@ -401,11 +404,23 @@ wd2 <- wd %>%
       p4.date.adm = date.adm,
       p4.date.rel = ifelse(p4.rel.group=="board", date.elig4+(max.exp.date-date.elig4)*addTime,
                     ifelse(p4.rel.group=="CR", cond.rel.date,
-                    ifelse(p4.rel.group=="NoRel", max.exp.date, NA)))) %>%
+                    ifelse(p4.rel.group=="NoRel", max.exp.date, NA))),
+      p4.date.rel = ifelse(p4.elig==1 & year(as.Date(p4.date.rel,format="%Y-%m-%d"))<2021, 2021, p4.date.rel)) %>%
    mutate_at(vars(ends_with("date.rel")), funs(as.Date(., format="%Y-%m-%d"))) %>%
    mutate_at(vars(ends_with("date.rel")), funs("yr"=year(.))) %>%
    rename_with(., ~gsub("date.rel_yr", "rel.yr", .x, fixed=TRUE),  ends_with("date.rel_yr")) %>%
    select(ends_with("rel.yr") | ends_with(".elig"))
+
+
+
+
+
+
+
+
+
+
+
 
 ## Estimate Number of Release by Year For Each Combinations of Policy Reform Scenario
 
