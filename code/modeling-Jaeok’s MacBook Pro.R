@@ -1,7 +1,7 @@
 # =============================================================================
 # Program Author: Jaeok Kim
 # Start Date: Dec 10, 2020
-# Update Date: Feb 9, 2021
+# Update Date: Jan 19, 2021
 # Content: Policy Modeling
 # Notes: Prison Modeling
 # =============================================================================
@@ -145,12 +145,11 @@ admission <- admission %>%
      age=Age.at.Admission,
      top.crime=Most.Serious.Crime) %>%
    mutate(
-      type="admission",
+      type="flow",
       year=ifelse(adm.mo<=3, adm.year, adm.year+1)) %>%
    select(year, type, adm.type, county, age, gender, top.crime)
 
-# Bind In-custody Data and Yearly Admission Data
-## NOTE: Admission Data Missing Feb2019-Mar2020 Admission
+## Admission File Missing Feb2019-Mar2020 Admission
 
 sf <- bind_rows(admission, custody) %>%
    mutate(
@@ -172,23 +171,13 @@ sf <- bind_rows(admission, custody) %>%
       age.group2=ifelse(age>=55, "age55+", "Under55"),
       NYC=ifelse(county %in% c("KINGS", "QUEENS", "NEW YORK", "BRONX", "RICHMOND"), "NYC", "non-NYC"))
 
-# Charge Severity Clean
+sf %>%
+group_by(type, year) %>%
+dplyr::summarise(N=n()) %>% data.frame()
 
-crime.code <- read_excel("data/DOCCS_Crime_Codes_DCJS.xlsx")
-crime.code <- data.frame(crime.code)
-names(crime.code) <- c("doccs.code", "crime.desc", "effective.date", "repeal.date", "legal",
-                       "code", "class", "crime.type")
+## 2020 flow missing Jan2020-Mar2020
 
-
-<- left_join(sf, crime.code) %>%
-
-
-
-
-
-
-# PROJECTION (28 groups): Admission Type*Charge Severity/Age/NYC
-## NOTE: Missing Admissions Jan2020-Mar2020 (impute the average admission of the last 9months)
+# PROJECTION 3: Admission Type
 
 var_list <- c("adm.type", "age.group2", "NYC", "type", "year")
 
@@ -197,7 +186,7 @@ df.overall <- sf %>%
    filter(year>=2016) %>%
    group_by_at(var_list) %>%
    dplyr::summarise(N=n()) %>%
-   mutate(N=ifelse(type=="admission" & year==2020, round(N+N*3/9), N)) %>%
+   mutate(N=ifelse(type=="flow" & year==2020, round(N*1.25), N)) %>%
    mutate(N.lag1=dplyr::lag(N, n=1, default=NA)) %>%
    arrange_at(var_list) %>% data.frame() %>%
    mutate(year=paste0("y",year),
@@ -229,6 +218,7 @@ df3 <- df1 %>%
    mutate(y2030=wAvg*(1+wDelta),
           d=(y2030-y2020)/10)
 
+#   summarise_at(vars(y2016:y2020, y2030), sum, na.rm=TRUE)
 
 # Estimate population in 2021-2029: Linear interpolation bewteen 2020-2030
 
@@ -259,9 +249,9 @@ proj <- df3 %>%
    select(var_merge, y2016:y2020, y2021:y2029, y2030) %>%
    mutate_at(vars(y2021:y2030), function(x) (round(x)))
 
-
 ## EXPORT DATA POINTS FOR A Figure
-write.csv(proj, "data/proj12.csv")
+write.csv(proj, "data/proj5.csv")
+
 
 # Aggregate numbers
 agg.proj <- proj %>%
@@ -269,64 +259,37 @@ group_by(type) %>%
 summarise_at(vars(y2016:y2030), funs(sum)) %>% data.frame()
 
 ## EXPORT DATA POINTS FOR A Figure
-write.csv(agg.proj, "data/agg.proj12.csv")
+write.csv(agg.proj, "data/agg.proj5.csv")
 
-# Aggregate numbers
-agg.sf <- proj %>%
-group_by(type,adm.type) %>%
-summarise_at(vars(y2016:y2030), funs(sum)) %>% data.frame()
-
-write.csv(agg.sf, "data/agg.sf.proj12.csv")
 #+end_src
 
 
 * Prospective Impact Estimation ------------------------------------------------------------
-** Parole Reform Impact Estimation
+** Parole Reform Impact Estimation 
 #+begin_src R :session :results silent
 
 ## CONDITION MATRIX (To Create)  ++ WORKING +++
 
-AE2 <- 55 # P2_Elder Parole_Age at Eligible : 50, (55), 60, 65
-TS2 <- 15 # P2_Elder Parole_Time Served: 5, 10, (15), 20
-TS5 <- 10 # P5_Youth Parole_Time Served: 5, (10), 15, 20
-AC5 <- 25 # P5_Youth Parole_Age at Crime (Under): 21, (25)
+AE2 <- 55 # P2_Elder Parole_Age at Eligible : 50, (55), 60, 65, 70
+TS2 <- 15 # P2_Elder Parole_Time Served: 5, 10, (15), 20, 25
+TS5 <- 10 # P5_Youth Parole_Time Served: 5, (10), 15, 20, 25
+AC5 <- 21 # P5_Youth Parole_Age at Crime (Under): (21), 25
 TS4 <- 10 # P4_Retroactive Sentencing: 5, (10), 15, 20, 25
 
-## Baseline release rate parameters without fair and timely parole
-prob.base <- c(0.70, 0.27, 0.03)
-group <- c("board", "CR", "NoRelease")
-pct.TS.base.board <- 0.53 # baseline avg.% maximum sentence served for those who were released by the parole board
+## Release Rate Parameters
 
-addTime <- ifelse(pct.TS.base.board==0.53, 0.2,
-           ifelse(pct.TS.base.board==0.40, 0.15,
-	   ifelse(pct.TS.base.board==0.30, 0.11,
-	   ifelse(pct.TS.base.board==0.20, 0.075,
-	   ifelse(pct.TS.base.board==0.10, 0.038,
-	   ifelse(pct.TS.base.board==0, 0))))))
+prob <- c(0.77, 0.16, 0.07)
+group <- c("board", "CR", "NoRel")
+addTime <- .18 
 
-# Additional Time Served after eligible for parole
-# 0.20, 0.15, 0.11, 0.075,  0.038, 0
-# 0.53, 0.40, 0.30, 0.20,  0.10, 0 (corresponding % maximum sentence served)
+##
+board   cr      noRel   addTime
+0.77	0.16	0.07	0.18
+0.80	0.14	0.06	0.10
+0.90	0.07	0.03	0.5
+1.00	0.00	0.00    0
 
-## Release Rate Parameters for Fair and Timely Parole
-prob <- c(0.70, 0.27, 0.03) # Distribution of release by parole board, release on conditional release date, no release until maximum
-## (0.85, 0.135, 0.015)
-## (1, 0, 0)
-## group <- c("board", "CR", "NoRelease")
-
-pct.TS3.board = 0  # [0.53 .40 .30 .20 .10 (.0)] # Release by the parole board: Percent maximum sentence served
-
-addTime.p3 <- ifelse(pct.TS3.board==0.53, 0.2,
-              ifelse(pct.TS3.board==0.40, 0.15,
-	      ifelse(pct.TS3.board==0.30, 0.11,
-	      ifelse(pct.TS3.board==0.20, 0.075,
-	      ifelse(pct.TS3.board==0.10, 0.038,
-	      ifelse(pct.TS3.board==0, 0))))))
-
-age.life <- 75
-
-## Create Charge Exclusion Criteri
-## Retroactive sentencing
+## Create Charge Exclusion List
 pl125 <- unique(ds$charge1[which(str_detect(ds$charge1, "(HOMICIDE|MANSLAUGH|MURDER)"))])
 money.laundering.terror <-
    unique(ds$charge1[str_detect(ds$charge1, "MONEY") & str_detect(ds$charge1, "TERROR")])
@@ -342,12 +305,12 @@ exclusion.list <- c(pl125, pl130, pl263, money.laundering.terror)
 wd  <- ds %>%
    mutate(
      # P1: TPV
-      p1.elig=ifelse(adm.type=="Parole/Cond.Rel Revoc",1,0), # identify people admitted for parole violation
-      p1.elig.yr=ifelse(p1.elig==1 & year(date.adm)<2021, 2021, NA), # people who are already eleigible on Jan1,2021
+      p1.elig=ifelse(adm.type=="Parole/Cond.Rel Revoc",1,0),
+      p1.elig.yr=ifelse(p1.elig==1 & year(date.adm)<2021, 2021, NA),
 
      # P2: Elder Parole
       date.age.c=as.Date(DOB+AE2*365), # date when age c (e.g.55)
-      date.served.c=as.Date(date.adm+TS2*365), # date when served c (e.g.15) yrs
+      date.served.c=as.Date(DOB+TS2*365), # date when served c (e.g.15) yrs
       date.elig2=as.Date(ifelse(date.age.c>date.served.c, date.age.c, date.served.c)), # earlest date meeting both criteria
 
       p2.elig=ifelse(adm.type!="New Commitment", 0, # exclude anyone not serving a sentence on commitment crime
@@ -359,10 +322,10 @@ wd  <- ds %>%
       date.elig2=as.Date(date.elig2, format="%Y-%m-%d"),
 
      # P5: Youth Parole
-      date.elig5=as.Date(sent.date+TS5*365), # date when served c (e.g. 10) yrs; date eligible for parole
-      youth=ifelse(age.crime<AC5, 1, 0), # people who committmed crime before age c (e.g.25)
+      date.elig5=as.Date(sent.date+TS5*365), # date when served 15 yrs; date eligible for parole
+      youth=ifelse(age.crime<AC5, 1, 0),
       p5.elig=ifelse(adm.type!="New Commitment", 0,
-                ifelse(youth==1 & date.elig5<par.elig.date,1, 0)), # people who meet both criteria (age at crime and sentence length)
+                ifelse(youth==1 & date.elig5<par.elig.date,1, 0)), # sentenced under age21 and eligible before parole eligiblity date
       p5.elig.yr=ifelse(p5.elig==1 & year(date.elig5)<2021, 2021,
                  ifelse(p5.elig==1, year(date.elig5), NA)),
       date.elig5=ifelse(p5.elig==1 & year(date.elig5)<2021, ymd("2021-01-01"), date.elig5),
@@ -379,7 +342,7 @@ wd  <- ds %>%
       date.elig3=ifelse(p3.elig==1 & year(date.elig3)<2021, ymd("2021-01-01"), date.elig3),
       date.elig3=as.Date(date.elig3, format="%Y-%m-%d"),
 
-      # P4: Retroactive Sentencing
+     # P4: Retroactive Sentencing
       sent.c=ifelse(max.sent.yr>=TS4, 1,0),    # Sentenced longer than c years (e.g.10)
       date.served.third=as.Date(sent.date+days(round(agg.max.sent/3)), format="%Y-%d-%d"), # date when served 1/3 max sentence
       p4.elig=ifelse(adm.type!="New Commitment", 0, # Exclude anyone not serving a new sentence
@@ -400,10 +363,6 @@ set.seed(4634)
 
 wd2 <- wd %>%
    mutate(
-      date.age.life=as.Date(DOB+age.life*365, format="%Y-%m-%f"), # date when age X (life expectancy)
-      new.max.exp.date=ifelse(max.sent.group=="Life", date.age.life, max.exp.date),
-      new.max.exp.date=as.Date(new.max.exp.date, origin="1970-01-01"),
-
      # P1: TPV
       p1.date.adm=ifelse(p1.elig==1 & year(date.adm)>=2021, NA, date.adm),
       p1.date.rel=ifelse(p1.elig==1 & year(date.adm)>=2021, NA,
@@ -414,87 +373,98 @@ wd2 <- wd %>%
 
      # P2: Elder Parole
       p2.rel.group = ifelse(p2.elig==1,
-                            sample(group, size=n(), prob=prob.base, replace=TRUE), NA),
+                            sample(group, size=n(), prob=prob, replace=TRUE), NA),
       p2.date.adm = date.adm,
       p2.date.rel = ifelse(p2.rel.group=="board", date.elig2+(max.exp.date-date.elig2)*addTime,
                     ifelse(p2.rel.group=="CR", cond.rel.date,
-                    ifelse(p2.rel.group=="NoRelease", new.max.exp.date, NA))),
-      p2.date.rel = ifelse(p2.elig==1 & year(as.Date(p2.date.rel,format="%Y-%m-%d"))<2021,
-                           as.Date("2021-01-01", format="%Y-%m-%d"), p2.date.rel),
+                    ifelse(p2.rel.group=="NoRel", max.exp.date, NA))),
+      p2.date.rel = ifelse(p2.elig==1 & year(as.Date(p2.date.rel,format="%Y-%m-%d"))<2021, 2021, p2.date.rel),
 
      # P5: Youth Parole
       p5.rel.group = ifelse(p5.elig==1,
-                            sample(group, size=n(), prob=prob.base, replace=TRUE), NA),
+                            sample(group, size=n(), prob=prob, replace=TRUE), NA),
       p5.date.adm = date.adm,
       p5.date.rel = ifelse(p5.rel.group=="board", date.elig5+(max.exp.date-date.elig5)*addTime,
                     ifelse(p5.rel.group=="CR", cond.rel.date,
-                    ifelse(p5.rel.group=="NoRelease", new.max.exp.date, NA))),
-      p5.date.rel = ifelse(p5.elig==1 & year(as.Date(p5.date.rel,format="%Y-%m-%d"))<2021,
-                           as.Date("2021-01-01", format="%Y-%m-%d"), p5.date.rel),
+                    ifelse(p5.rel.group=="NoRel", max.exp.date, NA))),
+      p5.date.rel = ifelse(p5.elig==1 & year(as.Date(p5.date.rel,format="%Y-%m-%d"))<2021, 2021, p5.date.rel),
 
      # P3: Fair and Timely Parole
       p3.rel.group = ifelse(p3.elig==1,
                             sample(group, size=n(), prob=prob, replace=TRUE), NA),
       p3.date.adm = date.adm,
-      p3.date.rel = ifelse(p3.rel.group=="board", date.elig3+(max.exp.date-date.elig3)*addTime.p3,
+      p3.date.rel = ifelse(p3.rel.group=="board", date.elig3+(max.exp.date-date.elig3)*addTime,
                     ifelse(p3.rel.group=="CR", cond.rel.date,
-                    ifelse(p3.rel.group=="NoRelease", new.max.exp.date, NA))),
-      p3.date.rel = ifelse(p3.elig==1 & year(as.Date(p3.date.rel,format="%Y-%m-%d"))<2021,
-                           as.Date("2021-01-01", format="%Y-%m-%d"), p3.date.rel),
+                    ifelse(p3.rel.group=="NoRel", max.exp.date, NA))),
+      p3.date.rel = ifelse(p3.elig==1 & year(as.Date(p3.date.rel,format="%Y-%m-%d"))<2021, 2021, p3.date.rel),
 
      # P4: Retroactive Sentencing
       p4.rel.group = ifelse(p4.elig==1,
-                            sample(group, size=n(), prob=prob.base, replace=TRUE), NA),
+                            sample(group, size=n(), prob=prob, replace=TRUE), NA),
       p4.date.adm = date.adm,
       p4.date.rel = ifelse(p4.rel.group=="board", date.elig4+(max.exp.date-date.elig4)*addTime,
                     ifelse(p4.rel.group=="CR", cond.rel.date,
-                    ifelse(p4.rel.group=="NoRelease", new.max.exp.date, NA))),
-      p4.date.rel = ifelse(p4.elig==1 & year(as.Date(p4.date.rel,format="%Y-%m-%d"))<2021,
-                           as.Date("2021-01-01", format="%Y-%m-%d"), p4.date.rel))%>%
+                    ifelse(p4.rel.group=="NoRel", max.exp.date, NA))),
+      p4.date.rel = ifelse(p4.elig==1 & year(as.Date(p4.date.rel,format="%Y-%m-%d"))<2021, 2021, p4.date.rel)) %>%
    mutate_at(vars(ends_with("date.rel")), funs(as.Date(., format="%Y-%m-%d"))) %>%
    mutate_at(vars(ends_with("date.rel")), funs("yr"=year(.))) %>%
    rename_with(., ~gsub("date.rel_yr", "rel.yr", .x, fixed=TRUE),  ends_with("date.rel_yr")) %>%
    select(ends_with("rel.yr") | ends_with(".elig"))
 
 
+
+
+
+
+
+
+
+
+
+
 ## Estimate Number of Release by Year For Each Combinations of Policy Reform Scenario
 
+### Policy Reform Combinations
+combo <- expand.grid(
+          pol1=c(1,0),
+          pol2=c(1,0),
+          pol3=c(1,0),
+          pol4=c(1,0),
+          pol5=c(1,0))
 
+combo$id <- rownames(combo)
+
+combo <- combo %>% select(id, everything())
+combo <- recast(combo, id ~ variable + value, id.var = 1, fun.aggregate = function(x) (length(x) > 0) + 0L)
+combo <- combo %>% select(ends_with("_1")) %>%
+         rename_with(., ~gsub("_1", "", .x, fixed=TRUE),  ends_with("_1"))
+
+###
 
 # +++ START HERE ++++++++
 
 tmp2 <- wd2 %>%
-    dplyr:: rename(rel.yr=p2.rel.yr) %>%
-    mutate(p2.elig.total=sum(p2.elig, na.rm=TRUE),
-           p2.rel.total=sum(p2.elig[!is.na(rel.yr)], na.rm=TRUE)) %>%
-   group_by(rel.yr) %>%
-   dplyr:: summarise(p2.rel=sum(p2.elig, na.rm=TRUE),
-                     p2.rel.total=mean(p2.rel.total),
-                     p2.elig.total=mean(p2.elig.total))  %>%
-   mutate(cum.p2.rel=cumsum(p2.rel)) %>%
-   filter(rel.yr<=2030) %>% select(rel.yr, p2.rel, cum.p2.rel, p2.rel.total, p2.elig.total) %>% data.frame()
+   group_by(p2.rel.yr) %>%
+   dplyr:: summarise(p2.rel=sum(p2.elig, na.rm=TRUE)) %>%
+   dplyr:: rename(rel.yr=p2.rel.yr) %>%
+   filter(rel.yr<=2030) %>% data.frame()
 
 tmp3 <- wd2 %>%
-    dplyr:: rename(rel.yr=p3.rel.yr) %>%
-    mutate(p3.elig.total=sum(p3.elig, na.rm=TRUE),
-           p3.rel.total=sum(p3.elig[!is.na(rel.yr)], na.rm=TRUE)) %>%
-   group_by(rel.yr) %>%
-   dplyr:: summarise(p3.rel=sum(p3.elig, na.rm=TRUE),
-                     p3.rel.total=mean(p3.rel.total),
-                     p3.elig.total=mean(p3.elig.total))  %>%
-   mutate(cum.p3.rel=cumsum(p3.rel)) %>%
-   filter(rel.yr<=2030) %>% select(rel.yr, p3.rel, cum.p3.rel, p3.rel.total, p3.elig.total) %>% data.frame()
+   group_by(p3.rel.yr) %>%
+   dplyr:: summarise(p3.rel=sum(p3.elig, na.rm=TRUE)) %>%
+   dplyr:: rename(rel.yr=p3.rel.yr) %>%
+   filter(rel.yr<=2030) %>% data.frame()
+
+tmp4 <- wd2 %>%
+   group_by(p4.rel.yr) %>%
+   dplyr:: summarise(p4.rel=sum(p4.elig, na.rm=TRUE)) %>%
+   dplyr:: rename(rel.yr=p4.rel.yr) %>%
+   filter(rel.yr<=2030) %>% data.frame()
 
 tmp5 <- wd2 %>%
-    dplyr:: rename(rel.yr=p5.rel.yr) %>%
-    mutate(p5.elig.total=sum(p5.elig, na.rm=TRUE),
-           p5.rel.total=sum(p5.elig[!is.na(rel.yr)], na.rm=TRUE)) %>%
-   group_by(rel.yr) %>%
-   dplyr:: summarise(p5.rel=sum(p5.elig, na.rm=TRUE),
-                     p5.rel.total=mean(p5.rel.total),
-                     p5.elig.total=mean(p5.elig.total))  %>%
-   mutate(cum.p5.rel=cumsum(p5.rel)) %>%
-   filter(rel.yr<=2030) %>% select(rel.yr, p5.rel, cum.p5.rel, p5.rel.total, p5.elig.total) %>% data.frame()
+   group_by(p5.rel.yr) %>%
+   dplyr:: summarise(p5.rel=sum(p5.elig, na.rm=TRUE)) %>%
+   dplyr:: rename(rel.yr=p5.rel.yr) %>%
+   filter(rel.yr<=2030) %>% data.frame()
 
 #+end_src
-
