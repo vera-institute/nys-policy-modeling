@@ -292,40 +292,18 @@ TS5 <- 10 # P5_Youth Parole_Time Served: 5, (10), 15, 20
 AC5 <- 25 # P5_Youth Parole_Age at Crime (Under): 21, (25)
 TS4 <- 10 # P4_Retroactive Sentencing: 5, (10), 15, 20, 25
 
-## Baseline release rate parameters without fair and timely parole
-prob.base <- c(0.70, 0.27, 0.03)
-group <- c("board", "CR", "NoRelease")
-pct.TS.base.board <- 0.53 # baseline avg.% maximum sentence served for those who were released by the parole board
+RR.base <- c(0.44 0.13 0.07 0.06 0.27 0.03) # Release Rate Distribution for P2,P4,P5
+                                            ## Needs to be updated if Fair and Timely Parole is implemented ##
 
-addTime <- ifelse(pct.TS.base.board==0.53, 0.2,
-           ifelse(pct.TS.base.board==0.40, 0.15,
-	   ifelse(pct.TS.base.board==0.30, 0.11,
-	   ifelse(pct.TS.base.board==0.20, 0.075,
-	   ifelse(pct.TS.base.board==0.10, 0.038,
-	   ifelse(pct.TS.base.board==0, 0))))))
+## P3_Fair and Timely Parole_Release Rate: 60%, 70%, 80%, 90%, 100%
+group <- c("initial", "re1", "re2", "re3", "CR", "noRelease")
+# c(0.60, 0.09, 0.05, 0.04, 0.19, 0.02)  # 60% initial release rate ; 52% release rate for reappearanc
+RR3 <- c(0.70, 0.07, 0.04, 0.03, 0.14, 0.02)
+#c(0.80, 0.05, 0.03, 0.02, 0.10, 0.01)
+#c(0.90, 0.02, 0.01, 0.01, 0.05, 0.01)
+#c(1, 0, 0, 0, 0, 0)
 
-# Additional Time Served after eligible for parole
-# 0.20, 0.15, 0.11, 0.075,  0.038, 0
-# 0.53, 0.40, 0.30, 0.20,  0.10, 0 (corresponding % maximum sentence served)
-
-## Release Rate Parameters for Fair and Timely Parole
-prob <- c(0.70, 0.27, 0.03) # Distribution of release by parole board, release on conditional release date, no release until maximum
-## (0.85, 0.135, 0.015)
-## (1, 0, 0)
-## group <- c("board", "CR", "NoRelease")
-
-pct.TS3.board = 0  # [0.53 .40 .30 .20 .10 (.0)] # Release by the parole board: Percent maximum sentence served
-
-addTime.p3 <- ifelse(pct.TS3.board==0.53, 0.2,
-              ifelse(pct.TS3.board==0.40, 0.15,
-	      ifelse(pct.TS3.board==0.30, 0.11,
-	      ifelse(pct.TS3.board==0.20, 0.075,
-	      ifelse(pct.TS3.board==0.10, 0.038,
-	      ifelse(pct.TS3.board==0, 0))))))
-
-age.life <- 75
-
-## Create Charge Exclusion Criteri
+## Create Charge Exclusion Criteria
 ## Retroactive sentencing
 pl125 <- unique(ds$charge1[which(str_detect(ds$charge1, "(HOMICIDE|MANSLAUGH|MURDER)"))])
 money.laundering.terror <-
@@ -414,43 +392,55 @@ wd2 <- wd %>%
 
      # P2: Elder Parole
       p2.rel.group = ifelse(p2.elig==1,
-                            sample(group, size=n(), prob=prob.base, replace=TRUE), NA),
+                            sample(group, size=n(), prob=RR.base, replace=TRUE), NA),
       p2.date.adm = date.adm,
-      p2.date.rel = ifelse(p2.rel.group=="board", date.elig2+(max.exp.date-date.elig2)*addTime,
-                    ifelse(p2.rel.group=="CR", cond.rel.date,
-                    ifelse(p2.rel.group=="NoRelease", new.max.exp.date, NA))),
+      p2.date.rel = ifelse(p2.rel.group=="initial", date.elig2,
+                    ifelse(p2.rel.group=="re1", date.elig2+years(2),
+                    ifelse(p2.rel.group=="re2", date.elig2+years(4),
+                    ifelse(p2.rel.group=="re3", date.elig2+years(6), 
+ 		    ifelse(p2.rel.group=="CR", cond.rel.date, 
+ 		    ifelse(p2.rel.group=="noRelease", as.Date("2040-01-01", format="%Y-%m-%d"), NA)))))),
       p2.date.rel = ifelse(p2.elig==1 & year(as.Date(p2.date.rel,format="%Y-%m-%d"))<2021,
                            as.Date("2021-01-01", format="%Y-%m-%d"), p2.date.rel),
 
      # P5: Youth Parole
       p5.rel.group = ifelse(p5.elig==1,
-                            sample(group, size=n(), prob=prob.base, replace=TRUE), NA),
+                            sample(group, size=n(), prob=RR.base, replace=TRUE), NA),
       p5.date.adm = date.adm,
-      p5.date.rel = ifelse(p5.rel.group=="board", date.elig5+(max.exp.date-date.elig5)*addTime,
-                    ifelse(p5.rel.group=="CR", cond.rel.date,
-                    ifelse(p5.rel.group=="NoRelease", new.max.exp.date, NA))),
+      p5.date.rel = ifelse(p5.rel.group=="initial", date.elig5,
+                    ifelse(p5.rel.group=="re1", date.elig5+years(2),
+                    ifelse(p5.rel.group=="re2", date.elig5+years(4),
+                    ifelse(p5.rel.group=="re3", date.elig5+years(6), 
+ 		    ifelse(p5.rel.group=="CR", cond.rel.date, 
+ 		    ifelse(p5.rel.group=="noRelease", as.Date("2040-01-01", format="%Y-%m-%d"), NA)))))),
       p5.date.rel = ifelse(p5.elig==1 & year(as.Date(p5.date.rel,format="%Y-%m-%d"))<2021,
                            as.Date("2021-01-01", format="%Y-%m-%d"), p5.date.rel),
 
-     # P3: Fair and Timely Parole
-      p3.rel.group = ifelse(p3.elig==1,
-                            sample(group, size=n(), prob=prob, replace=TRUE), NA),
-      p3.date.adm = date.adm,
-      p3.date.rel = ifelse(p3.rel.group=="board", date.elig3+(max.exp.date-date.elig3)*addTime.p3,
-                    ifelse(p3.rel.group=="CR", cond.rel.date,
-                    ifelse(p3.rel.group=="NoRelease", new.max.exp.date, NA))),
-      p3.date.rel = ifelse(p3.elig==1 & year(as.Date(p3.date.rel,format="%Y-%m-%d"))<2021,
-                           as.Date("2021-01-01", format="%Y-%m-%d"), p3.date.rel),
-
      # P4: Retroactive Sentencing
       p4.rel.group = ifelse(p4.elig==1,
-                            sample(group, size=n(), prob=prob.base, replace=TRUE), NA),
+                            sample(group, size=n(), prob=RR.base, replace=TRUE), NA),
       p4.date.adm = date.adm,
-      p4.date.rel = ifelse(p4.rel.group=="board", date.elig4+(max.exp.date-date.elig4)*addTime,
-                    ifelse(p4.rel.group=="CR", cond.rel.date,
-                    ifelse(p4.rel.group=="NoRelease", new.max.exp.date, NA))),
+      p4.date.rel = ifelse(p4.rel.group=="initial", date.elig4,
+                    ifelse(p4.rel.group=="re1", date.elig4+years(2),
+                    ifelse(p4.rel.group=="re2", date.elig4+years(4),
+                    ifelse(p4.rel.group=="re3", date.elig4+years(6), 
+ 		    ifelse(p4.rel.group=="CR", cond.rel.date, 
+ 		    ifelse(p4.rel.group=="noRelease", as.Date("2040-01-01", format="%Y-%m-%d"), NA)))))),
       p4.date.rel = ifelse(p4.elig==1 & year(as.Date(p4.date.rel,format="%Y-%m-%d"))<2021,
-                           as.Date("2021-01-01", format="%Y-%m-%d"), p4.date.rel))%>%
+                           as.Date("2021-01-01", format="%Y-%m-%d"), p4.date.rel),
+
+     # P3: Fair and Timely Parole
+      p3.rel.group = ifelse(p3.elig==1,
+                            sample(group, size=n(), prob=RR3, replace=TRUE), NA),
+      p3.date.adm = date.adm,
+      p3.date.rel = ifelse(p3.rel.group=="initial", date.elig3,
+                    ifelse(p3.rel.group=="re1", date.elig3+years(2),
+                    ifelse(p3.rel.group=="re2", date.elig3+years(4),
+                    ifelse(p3.rel.group=="re3", date.elig3+years(6), 
+ 		    ifelse(p3.rel.group=="CR", cond.rel.date, 
+ 		    ifelse(p3.rel.group=="noRelease", as.Date("2040-01-01", format="%Y-%m-%d"), NA)))))),
+      p3.date.rel = ifelse(p3.elig==1 & year(as.Date(p3.date.rel,format="%Y-%m-%d"))<2021,
+                           as.Date("2021-01-01", format="%Y-%m-%d"), p3.date.rel))%>%
    mutate_at(vars(ends_with("date.rel")), funs(as.Date(., format="%Y-%m-%d"))) %>%
    mutate_at(vars(ends_with("date.rel")), funs("yr"=year(.))) %>%
    rename_with(., ~gsub("date.rel_yr", "rel.yr", .x, fixed=TRUE),  ends_with("date.rel_yr")) %>%
@@ -461,7 +451,7 @@ wd2 <- wd %>%
 
 
 
-# +++ START HERE ++++++++
+# +++ Summary  ++++++++
 
 tmp2 <- wd2 %>%
     dplyr:: rename(rel.yr=p2.rel.yr) %>%
