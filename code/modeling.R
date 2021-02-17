@@ -1,7 +1,7 @@
 # =============================================================================
 # Program Author: Jaeok Kim
 # Start Date: Dec 10, 2020
-# Update Date: Feb 9, 2021
+# Update Date: Feb 17, 2021
 # Content: Policy Modeling
 # Notes: Prison Modeling
 # =============================================================================
@@ -106,9 +106,9 @@ df.oct <- s3read_using(FUN=read.csv,
 		   bucket="vera-gjny/curated_data/ny_prison/in_custody/2020_10")
 
 
-## People In Custody (NYS Open Data)
-custody <- read.csv("~/OneDrive - Vera Institute of Justice/Project/ESI/Modeling/Data/Inmates_Under_Custody__Beginning_2008.csv")
-
+## People In Custody and Annual Prsion Admissions (NYS Open Data)
+custody <- read.csv("data/TRIMMED_Inmates_Under_Custody__Beginning_2008.csv")
+admission <- read.csv("data/TRIMMED_Prison_Admissions__Beginning_2008.csv")
 
 #+end_src
 
@@ -117,7 +117,6 @@ custody <- read.csv("~/OneDrive - Vera Institute of Justice/Project/ESI/Modeling
 #+begin_src R :session :results silent
 
 # In Custody Population Data
-custody <- read.csv("data/Inmates_Under_Custody__Beginning_2008.csv")
 custody <- custody %>%
    dplyr::rename(
       year=Snapshot.Year,
@@ -128,12 +127,12 @@ custody <- custody %>%
       age=Current.Age,
       facility=Housing.Facility,
       security.level=Facility.Security.Level,
-      race=Race.Ethnicity) %>%
+      race=Race.Ethnicity,
+      vfo=VF.Indicator) %>%
    mutate(type="total") %>%
-   select(year, type, adm.type, county, age, gender, top.crime)
+   select(year, type, adm.type, county, age, gender, top.crime, severity, vfo)
 
 # Yearly Admission Data
-admission <- read.csv("data/Prison_Admissions__Beginning_2008.csv")
 admission <- admission %>%
    dplyr::rename(
      adm.year=Admission.Year,
@@ -143,11 +142,12 @@ admission <- admission %>%
      residence=Last.Known.Residence.County,
      gender=Gender,
      age=Age.at.Admission,
-     top.crime=Most.Serious.Crime) %>%
+     top.crime=Most.Serious.Crime,
+     vfo=VF.Indicator) %>%
    mutate(
       type="admission",
       year=ifelse(adm.mo<=3, adm.year, adm.year+1)) %>%
-   select(year, type, adm.type, county, age, gender, top.crime)
+   select(year, type, adm.type, county, age, gender, top.crime, severity, vfo)
 
 # Bind In-custody Data and Yearly Admission Data
 ## NOTE: Admission Data Missing Feb2019-Mar2020 Admission
@@ -170,27 +170,19 @@ sf <- bind_rows(admission, custody) %>%
            	             "age30-34", "age35-39", "age40-44", "age45-49",
 			     "age50-54", "age55-59", "60 or over")),
       age.group2=ifelse(age>=55, "age55+", "Under55"),
-      NYC=ifelse(county %in% c("KINGS", "QUEENS", "NEW YORK", "BRONX", "RICHMOND"), "NYC", "non-NYC"))
-
-# Charge Severity Clean
-
-crime.code <- read_excel("data/DOCCS_Crime_Codes_DCJS.xlsx")
-crime.code <- data.frame(crime.code)
-names(crime.code) <- c("doccs.code", "crime.desc", "effective.date", "repeal.date", "legal",
-                       "code", "class", "crime.type")
-
-
-<- left_join(sf, crime.code) %>%
-
-
-
-
-
-
+      NYC=ifelse(county %in% c("KINGS", "QUEENS", "NEW YORK", "BRONX", "RICHMOND"), "NYC", "non-NYC")) %>%
+   mutate(
+     adm.type2=ifelse(adm.type=="OTHER", "Other",
+               ifelse(adm.type=="RET PAROLE VIOLATOR", "TPV",
+	       ifelse(severity=="AF", "New_A",
+	       ifelse(severity=="BF", "New_B",
+	       ifelse(severity=="CF", "New_C",
+	       ifelse(severity=="DF", "New_D", "New_E")))))))
+ 
 # PROJECTION (28 groups): Admission Type*Charge Severity/Age/NYC
 ## NOTE: Missing Admissions Jan2020-Mar2020 (impute the average admission of the last 9months)
 
-var_list <- c("adm.type", "age.group2", "NYC", "type", "year")
+var_list <- c("adm.type2", "age.group2", "NYC", "type", "year")
 
 ## Create a lag variable
 df.overall <- sf %>%
@@ -261,7 +253,7 @@ proj <- df3 %>%
 
 
 ## EXPORT DATA POINTS FOR A Figure
-write.csv(proj, "data/proj12.csv")
+write.csv(proj, "data/proj32.csv")
 
 # Aggregate numbers
 agg.proj <- proj %>%
@@ -269,14 +261,14 @@ group_by(type) %>%
 summarise_at(vars(y2016:y2030), funs(sum)) %>% data.frame()
 
 ## EXPORT DATA POINTS FOR A Figure
-write.csv(agg.proj, "data/agg.proj12.csv")
+write.csv(agg.proj, "data/agg.proj32.csv")
 
 # Aggregate numbers
 agg.sf <- proj %>%
-group_by(type,adm.type) %>%
+group_by(type,adm.type2) %>%
 summarise_at(vars(y2016:y2030), funs(sum)) %>% data.frame()
 
-write.csv(agg.sf, "data/agg.sf.proj12.csv")
+write.csv(agg.sf, "data/agg.sf.proj32.csv")
 #+end_src
 
 
@@ -292,7 +284,7 @@ TS5 <- 10 # P5_Youth Parole_Time Served: 5, (10), 15, 20
 AC5 <- 25 # P5_Youth Parole_Age at Crime (Under): 21, (25)
 TS4 <- 10 # P4_Retroactive Sentencing: 5, (10), 15, 20, 25
 
-RR.base <- c(0.44 0.13 0.07 0.06 0.27 0.03) # Release Rate Distribution for P2,P4,P5
+RR.base <- c(0.44, 0.13, 0.07, 0.06, 0.27, 0.03) # Release Rate Distribution for P2,P4,P5
                                             ## Needs to be updated if Fair and Timely Parole is implemented ##
 
 ## P3_Fair and Timely Parole_Release Rate: 60%, 70%, 80%, 90%, 100%
@@ -319,10 +311,6 @@ exclusion.list <- c(pl125, pl130, pl263, money.laundering.terror)
 
 wd  <- ds %>%
    mutate(
-     # P1: TPV
-      p1.elig=ifelse(adm.type=="Parole/Cond.Rel Revoc",1,0), # identify people admitted for parole violation
-      p1.elig.yr=ifelse(p1.elig==1 & year(date.adm)<2021, 2021, NA), # people who are already eleigible on Jan1,2021
-
      # P2: Elder Parole
       date.age.c=as.Date(DOB+AE2*365), # date when age c (e.g.55)
       date.served.c=as.Date(date.adm+TS2*365), # date when served c (e.g.15) yrs
@@ -339,8 +327,9 @@ wd  <- ds %>%
      # P5: Youth Parole
       date.elig5=as.Date(sent.date+TS5*365), # date when served c (e.g. 10) yrs; date eligible for parole
       youth=ifelse(age.crime<AC5, 1, 0), # people who committmed crime before age c (e.g.25)
-      p5.elig=ifelse(adm.type!="New Commitment", 0,
-                ifelse(youth==1 & date.elig5<par.elig.date,1, 0)), # people who meet both criteria (age at crime and sentence length)
+      p5.elig=ifelse(adm.type!="New Commitment", 0,  # exclude anyone not serving a sentence on commitment crime
+                ifelse(!is.na(par.elig.date) & youth==1 & date.elig5<par.elig.date,1,  # people who meet both criteria (age at crime and sentence length) (indeterminate sentence)
+		ifelse(is.na(par.elig.date) & youth==1 & (year(date.elig2)-year(max.exp.date))<0, 1,  0))), # (determinate sentence)
       p5.elig.yr=ifelse(p5.elig==1 & year(date.elig5)<2021, 2021,
                  ifelse(p5.elig==1, year(date.elig5), NA)),
       date.elig5=ifelse(p5.elig==1 & year(date.elig5)<2021, ymd("2021-01-01"), date.elig5),
@@ -378,17 +367,9 @@ set.seed(4634)
 
 wd2 <- wd %>%
    mutate(
-      date.age.life=as.Date(DOB+age.life*365, format="%Y-%m-%f"), # date when age X (life expectancy)
-      new.max.exp.date=ifelse(max.sent.group=="Life", date.age.life, max.exp.date),
-      new.max.exp.date=as.Date(new.max.exp.date, origin="1970-01-01"),
-
-     # P1: TPV
-      p1.date.adm=ifelse(p1.elig==1 & year(date.adm)>=2021, NA, date.adm),
-      p1.date.rel=ifelse(p1.elig==1 & year(date.adm)>=2021, NA,
-                  ifelse(p1.elig==1 & year(date.adm)<2021,
-                         as.Date("2021-01-01", format="%Y-%m-%d"), NA)),
-      p1.date.adm=as.Date(p1.date.adm, format="%Y-%m-%d"),
-      p1.date.rel=as.Date(p1.date.rel, format="%Y-%m-%d"),
+#      date.age.life=as.Date(DOB+age.life*365, format="%Y-%m-%f"), # date when age X (life expectancy)
+#      new.max.exp.date=ifelse(max.sent.group=="Life", date.age.life, max.exp.date),
+#      new.max.exp.date=as.Date(new.max.exp.date, origin="1970-01-01"),
 
      # P2: Elder Parole
       p2.rel.group = ifelse(p2.elig==1,
@@ -397,8 +378,8 @@ wd2 <- wd %>%
       p2.date.rel = ifelse(p2.rel.group=="initial", date.elig2,
                     ifelse(p2.rel.group=="re1", date.elig2+years(2),
                     ifelse(p2.rel.group=="re2", date.elig2+years(4),
-                    ifelse(p2.rel.group=="re3", date.elig2+years(6), 
- 		    ifelse(p2.rel.group=="CR", cond.rel.date, 
+                    ifelse(p2.rel.group=="re3", date.elig2+years(6),
+ 		    ifelse(p2.rel.group=="CR", cond.rel.date,
  		    ifelse(p2.rel.group=="noRelease", as.Date("2040-01-01", format="%Y-%m-%d"), NA)))))),
       p2.date.rel = ifelse(p2.elig==1 & year(as.Date(p2.date.rel,format="%Y-%m-%d"))<2021,
                            as.Date("2021-01-01", format="%Y-%m-%d"), p2.date.rel),
@@ -410,8 +391,8 @@ wd2 <- wd %>%
       p5.date.rel = ifelse(p5.rel.group=="initial", date.elig5,
                     ifelse(p5.rel.group=="re1", date.elig5+years(2),
                     ifelse(p5.rel.group=="re2", date.elig5+years(4),
-                    ifelse(p5.rel.group=="re3", date.elig5+years(6), 
- 		    ifelse(p5.rel.group=="CR", cond.rel.date, 
+                    ifelse(p5.rel.group=="re3", date.elig5+years(6),
+ 		    ifelse(p5.rel.group=="CR", cond.rel.date,
  		    ifelse(p5.rel.group=="noRelease", as.Date("2040-01-01", format="%Y-%m-%d"), NA)))))),
       p5.date.rel = ifelse(p5.elig==1 & year(as.Date(p5.date.rel,format="%Y-%m-%d"))<2021,
                            as.Date("2021-01-01", format="%Y-%m-%d"), p5.date.rel),
@@ -423,8 +404,8 @@ wd2 <- wd %>%
       p4.date.rel = ifelse(p4.rel.group=="initial", date.elig4,
                     ifelse(p4.rel.group=="re1", date.elig4+years(2),
                     ifelse(p4.rel.group=="re2", date.elig4+years(4),
-                    ifelse(p4.rel.group=="re3", date.elig4+years(6), 
- 		    ifelse(p4.rel.group=="CR", cond.rel.date, 
+                    ifelse(p4.rel.group=="re3", date.elig4+years(6),
+ 		    ifelse(p4.rel.group=="CR", cond.rel.date,
  		    ifelse(p4.rel.group=="noRelease", as.Date("2040-01-01", format="%Y-%m-%d"), NA)))))),
       p4.date.rel = ifelse(p4.elig==1 & year(as.Date(p4.date.rel,format="%Y-%m-%d"))<2021,
                            as.Date("2021-01-01", format="%Y-%m-%d"), p4.date.rel),
@@ -436,8 +417,8 @@ wd2 <- wd %>%
       p3.date.rel = ifelse(p3.rel.group=="initial", date.elig3,
                     ifelse(p3.rel.group=="re1", date.elig3+years(2),
                     ifelse(p3.rel.group=="re2", date.elig3+years(4),
-                    ifelse(p3.rel.group=="re3", date.elig3+years(6), 
- 		    ifelse(p3.rel.group=="CR", cond.rel.date, 
+                    ifelse(p3.rel.group=="re3", date.elig3+years(6),
+ 		    ifelse(p3.rel.group=="CR", cond.rel.date,
  		    ifelse(p3.rel.group=="noRelease", as.Date("2040-01-01", format="%Y-%m-%d"), NA)))))),
       p3.date.rel = ifelse(p3.elig==1 & year(as.Date(p3.date.rel,format="%Y-%m-%d"))<2021,
                            as.Date("2021-01-01", format="%Y-%m-%d"), p3.date.rel))%>%
@@ -452,6 +433,10 @@ wd2 <- wd %>%
 
 
 # +++ Summary  ++++++++
+tmp1 <- proj  %>% filter(type=="total") %>%
+group_by(adm.type2) %>%
+summarise_at(vars(y2016:y2030), funs(sum)) %>% data.frame() %>%
+filter(adm.type2=="TPV")
 
 tmp2 <- wd2 %>%
     dplyr:: rename(rel.yr=p2.rel.yr) %>%
